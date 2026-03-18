@@ -1,0 +1,211 @@
+---
+name: go-unit-test-gomock
+description: 'Write Go unit tests with go.uber.org/mock/gomock, gomock-generated mocks, and testify suite.Suite. Use when adding or updating *_test.go files, building mock-based tests, replacing gomock.Any with exact values, or creating reusable test suites for handlers, usecases, and services.'
+argument-hint: 'Describe the Go package, target function or method, and the behavior or cases to test.'
+user-invocable: true
+---
+
+# Go Unit Tests With Gomock
+
+## What This Skill Produces
+
+This skill creates or updates Go unit tests that:
+
+- use `go.uber.org/mock/gomock`
+- use generated mocks instead of handwritten mock data
+- avoid `gomock.Any()` and pass concrete expected values
+- group related tests under a `suite.Suite` test harness so the package can run the full suite together
+
+## When to Use
+
+Use this skill when you need to:
+
+- add a new `*_test.go` file in a Go package
+- test a handler, usecase, repository wrapper, service, or validator
+- mock dependencies behind interfaces
+- convert ad hoc tests into a suite-based structure
+- tighten weak gomock expectations so tests assert the exact inputs being passed
+
+## Rules
+
+1. Use mocks generated from interfaces with `mockgen`.
+2. For every `interfaces.go` file that is created, add this line directly above the interface definitions:
+
+```go
+//go:generate mockgen -source=interfaces.go -destination=mock/mock.go -package=mock
+```
+
+3. If an existing `interfaces.go` file is missing that line, add it.
+4. Do not use `gomock.Any()`.
+5. Use explicit values in `EXPECT()` calls. Pass the concrete request, context, ID, struct, error, or primitive that the code should send.
+6. Always include `.Times(n)` on every `EXPECT()` chain so the expected call count is explicit.
+7. If the code currently makes exact matching difficult, make the test deterministic first. Inject time, UUIDs, or other dynamic dependencies so the expectation can still use exact values.
+8. Use a suite struct that embeds `suite.Suite` and stores shared fixtures such as `ctrl`, mocks, and the system under test.
+9. Use `SetupTest()` to create a fresh `gomock.Controller` and fresh mocks for every test.
+10. Use `TearDownTest()` to call `ctrl.Finish()`.
+11. Add a `TestXxxSuite` entrypoint so `go test` runs the full suite.
+12. Keep expectations narrow. Each test should assert one behavior or failure path.
+
+## Procedure
+
+1. Inspect the target package.
+Find the production code, the interfaces it depends on, and any existing test helpers or mock packages.
+
+2. Verify mock generation.
+Check whether the package already has a `mock/` folder and the required directive in `interfaces.go`.
+
+```go
+//go:generate mockgen -source=interfaces.go -destination=mock/mock.go -package=mock
+```
+
+If the directive is missing from `interfaces.go`, add it before working on the mocks.
+
+3. Choose the test package.
+Match the package's existing convention: use either `package foo` or `package foo_test` consistently with nearby tests.
+
+4. Build the suite.
+Create a suite struct that embeds `suite.Suite` and includes:
+
+- `ctrl *gomock.Controller`
+- one field per generated mock
+- one field for the system under test
+
+5. Initialize shared state.
+In `SetupTest()`, create the controller with `gomock.NewController(s.T())`, initialize mocks with the generated constructors, and build the subject under test with deterministic dependencies.
+
+6. Add the suite runner.
+Expose one top-level function:
+
+```go
+func TestUsecaseSuite(t *testing.T) {
+	suite.Run(t, new(UsecaseSuite))
+}
+```
+
+7. Write one test method per scenario.
+Name methods like `Test_GetProducts_Success` or `Test_InitVerify_ValidationError`.
+
+8. Set strict gomock expectations.
+Use exact values in `EXPECT()` calls. Example:
+
+```go
+ctx := context.Background()
+req := Request{ID: "abc-123", Email: "user@example.com"}
+
+s.repo.EXPECT().Create(ctx, req).Return(nil).Times(1)
+```
+
+Do not replace `ctx` or `req` with `gomock.Any()`. Do not omit `.Times(n)`.
+
+9. Assert the full outcome.
+Verify returned values, errors, HTTP status codes, response payloads, and state changes. Use `s.Require()` for preconditions and `s.Equal()` or `s.Error()` for behavior assertions.
+
+10. Run the narrowest useful test command.
+Prefer the package-level command first, then widen scope only if needed:
+
+```bash
+go test ./path/to/package -run TestUsecaseSuite
+go test ./path/to/package
+```
+
+11. Regenerate mocks when interfaces change.
+Run:
+
+```bash
+go generate ./...
+```
+
+## Suite Template
+
+```go
+package yourpkg_test
+
+import (
+	"testing"
+
+	"github.com/stretchr/testify/suite"
+	"go.uber.org/mock/gomock"
+
+	"your/module/yourpkg"
+	"your/module/yourpkg/mock"
+)
+
+type UsecaseSuite struct {
+	suite.Suite
+
+	ctrl *gomock.Controller
+	repo *mock.MockIRepository
+	ext  *mock.MockIExternal
+
+	uc *yourpkg.Usecase
+}
+
+func TestUsecaseSuite(t *testing.T) {
+	suite.Run(t, new(UsecaseSuite))
+}
+
+func (s *UsecaseSuite) SetupTest() {
+	s.ctrl = gomock.NewController(s.T())
+	s.repo = mock.NewMockIRepository(s.ctrl)
+	s.ext = mock.NewMockIExternal(s.ctrl)
+	s.uc = yourpkg.NewUsecase(s.repo, s.ext)
+}
+
+func (s *UsecaseSuite) TearDownTest() {
+	s.ctrl.Finish()
+}
+
+func (s *UsecaseSuite) Test_DoThing_Success() {
+	input := yourpkg.Input{ID: "dealer-001"}
+	expected := yourpkg.Output{Status: "ok"}
+
+	s.repo.EXPECT().Load(input.ID).Return(expected, nil).Times(1)
+
+	actual, err := s.uc.DoThing(input)
+	s.Require().NoError(err)
+	s.Equal(expected, actual)
+}
+```
+
+## Decision Points
+
+### If the dependency input is dynamic
+
+- Do not fall back to `gomock.Any()`.
+- Inject deterministic collaborators such as clocks, UUID generators, or request IDs.
+- Build the exact expected struct after setting those deterministic values.
+
+### If a method takes `context.Context`
+
+- Reuse a known context variable created in the test and pass that same variable into the subject call.
+- If the production code creates derived contexts internally, prefer refactoring so the externally relevant values can still be asserted exactly.
+
+### If the package already uses plain `testing.T`
+
+- Keep the existing style only when the change is intentionally small.
+- For new multi-scenario tests, prefer converting to `suite.Suite` so shared setup and mocks stay consistent.
+
+### If interfaces or constructors are hard to mock
+
+- Fix the production seam instead of writing brittle tests.
+- Move side effects behind interfaces and inject them into the constructor.
+
+## Completion Checks
+
+The test is complete only if all of the following are true:
+
+- mocks come from `mockgen`
+- every created or updated `interfaces.go` file has the required `//go:generate mockgen -source=interfaces.go -destination=mock/mock.go -package=mock` line
+- the suite embeds `suite.Suite`
+- `SetupTest()`, `TearDownTest()`, and `TestXxxSuite()` exist
+- no `gomock.Any()` appears in the new or updated tests
+- every `EXPECT()` call includes explicit `.Times(n)`
+- expectations use exact values
+- the assertions cover the behavior the test is named for
+- the targeted `go test` command passes
+
+## Example Prompts
+
+- `/go-unit-test-gomock add tests for GetProducts success and repository failure in app/market/usecases.go`
+- `/go-unit-test-gomock create a suite-based handler test for app/onboarding/handlers.go using generated mocks`
+- `/go-unit-test-gomock refactor this test to remove gomock.Any and assert the exact request struct`
