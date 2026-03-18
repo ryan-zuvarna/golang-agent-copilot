@@ -41,10 +41,11 @@ Use this skill when you need to:
 6. Always include `.Times(n)` on every `EXPECT()` chain so the expected call count is explicit.
 7. If the code currently makes exact matching difficult, make the test deterministic first. Inject time, UUIDs, or other dynamic dependencies so the expectation can still use exact values.
 8. Use a suite struct that embeds `suite.Suite` and stores shared fixtures such as `ctrl`, mocks, and the system under test.
-9. Use `SetupTest()` to create a fresh `gomock.Controller` and fresh mocks for every test.
+9. Use `SetupTest()` to initialize repeating variables, shared dependencies, and the subject under test for every test.
 10. Use `TearDownTest()` to call `ctrl.Finish()`.
 11. Add a `TestXxxSuite` entrypoint so `go test` runs the full suite.
-12. Keep expectations narrow. Each test should assert one behavior or failure path.
+12. Keep `_test.go` files in the same directory as the production code, but use the external test package form: `package <name>_test`.
+13. Keep expectations narrow. Each test should assert one behavior or failure path.
 
 ## Procedure
 
@@ -61,7 +62,7 @@ Check whether the package already has a `mock/` folder and the required directiv
 If the directive is missing from `interfaces.go`, add it before working on the mocks.
 
 3. Choose the test package.
-Match the package's existing convention: use either `package foo` or `package foo_test` consistently with nearby tests.
+Keep the test file in the same directory as the production code and use the external test package form: `package foo_test`.
 
 4. Build the suite.
 Create a suite struct that embeds `suite.Suite` and includes:
@@ -71,7 +72,19 @@ Create a suite struct that embeds `suite.Suite` and includes:
 - one field for the system under test
 
 5. Initialize shared state.
-In `SetupTest()`, create the controller with `gomock.NewController(s.T())`, initialize mocks with the generated constructors, and build the subject under test with deterministic dependencies.
+In `SetupTest()`, create the controller with `gomock.NewController(s.T())`, initialize mocks with the generated constructors, initialize repeating variables, and build the subject under test with deterministic dependencies.
+
+Use `SetupTest()` as the single place for repeated setup like validators, request helpers, mock dependencies, and handler or usecase structs. Example:
+
+```go
+func (t *HandlerTestSuite) SetupTest() {
+	t.ctrl = gomock.NewController(t.T())
+	t.ext = mock.NewMockIExternal(t.ctrl)
+	t.uc = mock.NewMockIUsecase(t.ctrl)
+	validator := validator.New()
+	t.h = onboarding.NewHandler(t.ext, t.uc, validator)
+}
+```
 
 6. Add the suite runner.
 Expose one top-level function:
@@ -196,8 +209,10 @@ The test is complete only if all of the following are true:
 
 - mocks come from `mockgen`
 - every created or updated `interfaces.go` file has the required `//go:generate mockgen -source=interfaces.go -destination=mock/mock.go -package=mock` line
+- `_test.go` files stay in the same directory as the production code and use `package <name>_test`
 - the suite embeds `suite.Suite`
 - `SetupTest()`, `TearDownTest()`, and `TestXxxSuite()` exist
+- `SetupTest()` initializes repeated variables, shared dependencies, and the subject under test
 - no `gomock.Any()` appears in the new or updated tests
 - every `EXPECT()` call includes explicit `.Times(n)`
 - expectations use exact values
