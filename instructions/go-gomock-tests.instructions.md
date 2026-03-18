@@ -15,6 +15,7 @@ applyTo: "**/*_test.go"
 - Always include `.Times(n)` on every `EXPECT()` chain so the expected call count is explicit.
 - If exact matching is hard because the code uses dynamic values such as time, UUID, or request IDs, make the production code deterministic by injecting those dependencies.
 - Prefer a `suite.Suite` test harness for packages with multiple scenarios or shared setup.
+- Keep `_test.go` files in the same directory as the production code, but name the package `package <name>_test`.
 - The suite should include a `gomock.Controller`, generated mocks, and the subject under test.
 - Use `SetupTest()` to construct a fresh controller, initialize repeating variables, create fresh mocks, and build the subject under test for each test.
 - Use `TearDownTest()` to call `ctrl.Finish()`.
