@@ -1,6 +1,6 @@
 ---
 name: go-unit-test-gomock
-description: 'Detailed workflow for substantial Go unit test work. Use when adding new *_test.go files, building mock-based tests, introducing sqlmock-backed repository tests, converting tests to suite.Suite, or tightening weak gomock expectations. For small routine test edits, rely on the always-on unit test instruction instead of loading this skill.'
+description: 'Write Go unit tests with go.uber.org/mock/gomock, gomock-generated mocks, and testify suite.Suite. Use when adding or updating *_test.go files, building mock-based tests, replacing gomock.Any with exact values, or creating reusable test suites for handlers, usecases, and services.'
 argument-hint: 'Describe the Go package, target function or method, and the behavior or cases to test.'
 user-invocable: true
 ---
@@ -12,7 +12,6 @@ user-invocable: true
 This skill creates or updates Go unit tests that:
 
 - use `go.uber.org/mock/gomock`
-- use `github.com/DATA-DOG/go-sqlmock` when testing SQL-backed behavior
 - use generated mocks instead of handwritten mock data
 - avoid `gomock.Any()` and pass concrete expected values
 - group related tests under a `suite.Suite` test harness so the package can run the full suite together
@@ -22,14 +21,10 @@ This skill creates or updates Go unit tests that:
 Use this skill when you need to:
 
 - add a new `*_test.go` file in a Go package
-- make a substantial change to test structure or shared setup
 - test a handler, usecase, repository wrapper, service, or validator
-- add or refactor `sqlmock`-backed SQL tests
 - mock dependencies behind interfaces
 - convert ad hoc tests into a suite-based structure
 - tighten weak gomock expectations so tests assert the exact inputs being passed
-
-Do not load this skill just to make a small local edit that already fits the always-on instruction rules.
 
 ## Rules
 
@@ -52,16 +47,11 @@ Do not load this skill just to make a small local edit that already fits the alw
 12. Add a `TestXxxSuite` entrypoint so `go test` runs the full suite.
 13. Keep `_test.go` files in the same directory as the production code, but use the external test package form: `package <name>_test`.
 14. Keep expectations narrow. Each test should assert one behavior or failure path.
-15. When a test exercises SQL queries, transactions, or repository behavior against `*sql.DB` or `*gorm.DB`, use `sqlmock` for the database expectation layer instead of gomock or ad hoc in-memory databases.
-16. Call `time.Now()` or an injected `Now()` method at most once per test path unless the behavior under test genuinely depends on multiple distinct timestamps.
-17. When multiple related timestamps are needed in one test, capture a single base time and derive the others from it with `Add` or equivalent operations.
 
 ## Procedure
 
 1. Inspect the target package.
 Find the production code, the interfaces it depends on, and any existing test helpers or mock packages.
-
-If the code under test issues SQL through `database/sql`, GORM, or a repository implementation backed by a real DB handle, plan to use `sqlmock` for the DB interaction and keep gomock for the remaining interface dependencies.
 
 2. Verify mock generation.
 Check whether the package already has a `mock/` folder and the required directive in `interfaces.go`.
@@ -92,7 +82,6 @@ func (t *HandlerTestSuite) SetupTest() {
 	t.ctrl = gomock.NewController(t.T())
 	t.ext = mock.NewMockIExternal(t.ctrl)
 	t.uc = mock.NewMockIUsecase(t.ctrl)
-	t.now = time.Date(2026, time.March, 19, 10, 0, 0, 0, time.UTC)
 	validator := validator.New()
 	t.h = onboarding.NewHandler(t.ext, t.uc, validator)
 }
@@ -136,8 +125,6 @@ s.repo.EXPECT().Create(ctx, s.db, gomock.AssignableToTypeOf(&[]database.ProductB
 	Return(nil).
 	Times(1)
 ```
-
-If the subject under test reaches SQL, build the DB fixture with `sqlmock` and assert the exact query, args, rows, and transaction flow there as well. Do not replace SQL assertions with `gomock.Any()` or a loose fake database.
 
 9. Assert the full outcome.
 Verify returned values, errors, HTTP status codes, response payloads, and state changes. Use `s.Require()` for preconditions and `s.Equal()` or `s.Error()` for behavior assertions.
@@ -217,13 +204,6 @@ func (s *UsecaseSuite) Test_DoThing_Success() {
 - Inject deterministic collaborators such as clocks, UUID generators, or request IDs.
 - Build the exact expected struct after setting those deterministic values.
 
-### If the code depends on current time
-
-- Prefer an injected clock or `Now()` seam over calling `time.Now()` directly inside the code under test.
-- Read time at most once per test path unless the test is specifically verifying behavior across distinct moments.
-- If multiple timestamps are needed for setup or assertions, derive them from a single base value.
-- Multiple time reads are justified when the scenario truly models separate events, such as two HTTP requests sent at different points in the flow.
-
 ### If a dependency receives pointers or mutated arguments
 
 - Use `Do()` to inspect assigned values, captured arguments, or pointer contents.
@@ -245,13 +225,6 @@ func (s *UsecaseSuite) Test_DoThing_Success() {
 - Fix the production seam instead of writing brittle tests.
 - Move side effects behind interfaces and inject them into the constructor.
 
-### If the code talks to SQL
-
-- Use `sqlmock` to create the backing `*sql.DB`.
-- If GORM is involved, open GORM with the mocked SQL connection so the repository still runs real query-building code.
-- Assert the exact SQL behavior that matters for the scenario: query text or pattern, args, returned rows, exec result, begin, commit, and rollback.
-- Keep gomock for non-database collaborators only.
-
 ## Completion Checks
 
 The test is complete only if all of the following are true:
@@ -265,8 +238,6 @@ The test is complete only if all of the following are true:
 - no `gomock.Any()` appears in the new or updated tests
 - every `EXPECT()` call includes explicit `.Times(n)`
 - `Do()` is used when pointer arguments or mutation need value inspection or assignment
-- SQL-related tests use `sqlmock` for DB expectations instead of gomock or ad hoc in-memory databases
-- `time.Now()` or injected `Now()` reads are limited to one per test path unless distinct timestamps are part of the behavior being tested
 - expectations use exact values
 - the assertions cover the behavior the test is named for
 - the targeted `go test` command passes
@@ -276,5 +247,3 @@ The test is complete only if all of the following are true:
 - `/go-unit-test-gomock add tests for GetProducts success and repository failure in app/market/usecases.go`
 - `/go-unit-test-gomock create a suite-based handler test for app/onboarding/handlers.go using generated mocks`
 - `/go-unit-test-gomock refactor this test to remove gomock.Any and assert the exact request struct`
-- `/go-unit-test-gomock add repository tests that use sqlmock for the SQL path and gomock for the external dependency`
-- `/go-unit-test-gomock update these tests to inject time and keep Now() to one call unless the flow needs distinct timestamps`
