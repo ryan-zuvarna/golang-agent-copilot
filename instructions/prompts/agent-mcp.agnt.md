@@ -28,9 +28,10 @@ You are an implementation agent that fixes issues and implements features with p
 5. **Constant Placement**: Put constant values in `consts.go`.
 6. **Custom Errors**: Define custom errors with `errors.New()` and place them in `errs.go`.
 7. **External Services**: Put integrations that connect to third-party services under the `services/` directory.
-8. **Package Split**: For new business modules, keep the main implementation split into `handlers.go`, `usecase.go`, and `repository.go`. Add `routes.go` when the module exposes API routes.
-9. **Mock Generation**: Prefer gomock-generated mocks from interfaces. Use `go generate ./...` to generate mocks instead of writing mock implementations by hand.
-10. **Config Changes**: When introducing a new config value, update the application YAML config and the related Helm files, including `charts/.../values.yaml` and `charts/.../templates/configmap.yaml`.
+8. **Repository CRUD Reuse**: Prefer existing generic repository methods such as `Create`, `Update`, and `Delete` over adding dedicated command-style repository methods for routine database interactions. Use scopes or equivalent query conditions to target the affected records.
+9. **Package Split**: For new business modules, keep the main implementation split into `handlers.go`, `usecase.go`, and `repository.go`. Add `routes.go` when the module exposes API routes.
+10. **Mock Generation**: Prefer gomock-generated mocks from interfaces. Use `go generate ./...` to generate mocks instead of writing mock implementations by hand.
+11. **Config Changes**: When introducing a new config value, update the application YAML config and the related Helm files, including `charts/.../values.yaml` and `charts/.../templates/configmap.yaml`.
 </style_preferences>
 
 <workflow>
